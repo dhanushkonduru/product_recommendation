@@ -1,0 +1,19 @@
+# Core Data Processing
+pandas>=1.5.0
+numpy>=1.23.0
+
+# Deep Learning
+torch>=2.0.0
+transformers>=4.30.0
+torchvision>=0.15.0
+
+# Image Processing
+Pillow>=10.0.0
+
+# HTTP Requests (for image downloading)
+requests>=2.31.0
+
+# Utilities
+tqdm>=4.65.0
+scikit-learn>=1.3.0
+
