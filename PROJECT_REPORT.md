@@ -84,24 +84,29 @@ Traditional recommendation systems rely primarily on user-item interaction matri
 
 ### 3.4 Multimodal Fusion
 
-**Fusion Strategy: Concatenation**
+**Fusion Strategy: True Multimodal Transformer Fusion with Cross-Modal Attention**
 
 ```
-User Embedding (128-dim) ──┐
-Text Embedding (768-dim) ──┼─→ Project to 128-dim ──┐
-Image Embedding (512-dim) ─┘                        ├─→ Concatenate (384-dim) ─→ MLP → Score
-                                                    └─→ User Embedding (128-dim)
+Text Tokens ──┐
+              ├─→ Self-Attention (within modality)
+              ├─→ Cross-Modal Attention (text ↔ image)
+Image Patches ─┘
+              ├─→ Fusion Layer → Item Embedding
+              └─→ User Sequence (SASRec) → User Embedding
+              └─→ Dot Product → Score
 ```
 
 **Architecture:**
-- User embedding: 128 dimensions
-- Text projection: 768 → 128
-- Image projection: 512 → 128
-- Fusion MLP: 384 → 256 → 128 → 64 → 1
-- Dropout: 0.2
+- Transformer dimension: 256
+- Number of heads: 8
+- Number of layers: 3
+- Cross-modal attention: Text ↔ Image (allows modalities to attend to each other)
+- Self-attention: Within each modality
+- Sequential user model: SASRec-style Transformer (128-dim)
+- Ranking loss: BPR (Bayesian Personalized Ranking)
 
 **Training:**
-- Binary cross-entropy loss with negative sampling
+- BPR loss with negative sampling (1:4 ratio)
 - Adam optimizer, learning rate 0.001
 - 10 epochs
 

@@ -163,7 +163,7 @@ def main():
     print("="*60)
     print(f"\nImage embeddings saved for {len(item_image_embeddings)} items")
     print("Results saved to: image_encoder_data.pkl")
-    print("\nReady for: 06_multimodal_model.py")
+    print("\nReady for: 06_multimodal_transformer_fusion.py")
 
 
 if __name__ == "__main__":

@@ -42,8 +42,8 @@ python3 04_text_based_model.py
 # Step 5: Extract image features
 python3 05_image_encoder.py
 
-# Step 6: Train multimodal model
-python3 06_multimodal_model.py
+# Step 6: Train multimodal transformer fusion model
+python3 06_multimodal_transformer_fusion.py
 
 # Step 7: Evaluate all models
 python3 07_evaluation.py
@@ -62,7 +62,7 @@ python3 02_data_preparation.py
 python3 03_baseline_models.py
 python3 04_text_based_model.py
 python3 05_image_encoder.py
-python3 06_multimodal_model.py
+python3 06_multimodal_transformer_fusion.py
 python3 07_evaluation.py
 python3 08_documentation.py
 ```
@@ -86,7 +86,7 @@ scripts = [
     "03_baseline_models.py",
     "04_text_based_model.py",
     "05_image_encoder.py",
-    "06_multimodal_model.py",
+    "06_multimodal_transformer_fusion.py",
     "07_evaluation.py",
     "08_documentation.py"
 ]

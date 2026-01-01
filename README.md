@@ -9,10 +9,10 @@ A complete implementation of a multimodal recommendation system that combines pr
 ## 🎯 Project Overview
 
 This project demonstrates how to build a production-ready recommendation system using:
-- **Text Features:** Product titles and brands encoded with DistilBERT
-- **Image Features:** Product images encoded with ResNet18
-- **User Behavior:** Interaction history from Amazon Fashion dataset
-- **Fusion Strategy:** Concatenation-based multimodal fusion
+- **Text Features:** Product titles and brands encoded with CLIP
+- **Image Features:** Product images encoded with CLIP
+- **User Behavior:** Sequential interaction history modeled with SASRec-style Transformer
+- **Fusion Strategy:** True multimodal transformer fusion with cross-modal attention
 
 ## 📊 Results
 

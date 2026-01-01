@@ -43,7 +43,7 @@ def main():
         "03_baseline_models.py",
         "04_text_based_model.py",
         "05_image_encoder.py",
-        "06_multimodal_model.py",
+        "06_multimodal_transformer_fusion.py",
         "07_evaluation.py",
         "08_documentation.py"
     ]
