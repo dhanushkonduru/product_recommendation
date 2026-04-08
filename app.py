@@ -12,7 +12,9 @@ import math
 import os
 import pickle
 import random
+import re
 from collections import Counter
+from html import unescape
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -42,6 +44,14 @@ MODEL_OPTIONS = {
     "Option B (Fast Baseline)": "option_b",
     "Research Transformer (MPS)": "transformer",
 }
+
+SCRIPT_TITLE_MARKERS = (
+    "var apagestart",
+    "ue_t0",
+    "window.ue_",
+    "<script",
+    "function(",
+)
 
 
 # ============================================================================
@@ -422,8 +432,30 @@ def _placeholder_bytes(size: int = 400) -> bytes:
 def _fetch_image(url: str, timeout: int = 5) -> Optional[bytes]:
     """Fetch and cache a product image from URL. Returns None on failure."""
     try:
-        resp = requests.get(url, timeout=timeout, stream=True)
+        if not isinstance(url, str) or not url.strip():
+            return None
+
+        safe_url = url.strip()
+        if safe_url.startswith("//"):
+            safe_url = f"https:{safe_url}"
+
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/122.0 Safari/537.36"
+            ),
+            "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+            "Referer": "https://www.amazon.com/",
+        }
+
+        resp = requests.get(safe_url, timeout=timeout, headers=headers)
         resp.raise_for_status()
+
+        content_type = (resp.headers.get("content-type") or "").lower()
+        if "image" not in content_type:
+            return None
+
         img = Image.open(BytesIO(resp.content))
         if img.mode != "RGB":
             img = img.convert("RGB")
@@ -446,8 +478,28 @@ def get_item_image(item_id: str, metadata: Dict[str, Any]) -> bytes:
 
 
 def item_has_image(item_id: str, metadata: Dict[str, Any]) -> bool:
-    """Check if item has a real image URL."""
-    return bool(metadata.get(item_id, {}).get("image_url"))
+    """Check if item image URL exists and is fetchable."""
+    url = metadata.get(item_id, {}).get("image_url")
+    if not url:
+        return False
+    return _fetch_image(url) is not None
+
+
+def sanitize_title(title: Any, fallback: str) -> str:
+    """Clean malformed metadata titles and remove script-like payloads."""
+    if not isinstance(title, str):
+        return fallback
+
+    cleaned = unescape(title).strip()
+    lowered = cleaned.lower()
+
+    if any(marker in lowered for marker in SCRIPT_TITLE_MARKERS):
+        return fallback
+
+    cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+    return cleaned or fallback
 
 
 # ============================================================================
@@ -701,7 +753,10 @@ def main() -> None:
             with cols[i]:
                 img_bytes = get_item_image(item_id, metadata)
                 st.image(img_bytes, width="stretch")
-                title = metadata.get(item_id, {}).get("title", item_id)
+                title = sanitize_title(
+                    metadata.get(item_id, {}).get("title"),
+                    item_id,
+                )
                 display_title = (title[:55] + "…") if len(title) > 55 else title
                 st.markdown(
                     f'<div class="history-caption">{display_title}</div>',
@@ -767,7 +822,10 @@ def main() -> None:
 
             for col, rec in zip(cols, row):
                 item_id = rec["item_id"]
-                title = metadata.get(item_id, {}).get("title", item_id)
+                title = sanitize_title(
+                    metadata.get(item_id, {}).get("title"),
+                    item_id,
+                )
                 score = rec["score"]
 
                 with col:
