@@ -1,355 +1,308 @@
-# Multimodal Sequential Transformer Recommender
+# Multimodal Product Recommendation System
 
-A research-grade multimodal product recommendation system using frozen CLIP embeddings and learnable transformer-based sequential modeling, optimized for Apple Silicon (M1/M2 with MPS backend).
+End-to-end recommender system that combines text and image understanding (CLIP) with two ranking backends:
 
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-EE4C2C?logo=pytorch)](https://pytorch.org)
-[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python)](https://python.org)
-[![MPS](https://img.shields.io/badge/Accelerator-Apple_MPS-000000?logo=apple)](https://developer.apple.com/metal/)
-[![Streamlit](https://img.shields.io/badge/Demo-Streamlit-FF4B4B?logo=streamlit)](https://streamlit.io)
+- Option B baseline: lightweight time-decayed pooling + cosine-style scoring.
+- Research transformer: sequential transformer with CLS token and BPR ranking loss.
 
----
+This repository also includes a Streamlit app for interactive recommendations and model comparison.
 
-## 🎯 Problem Statement
+This README is the single project documentation file and contains architecture + structure details.
 
-**Goal**: Recommend products to users based on their interaction history, leveraging both textual and visual signals.
+## What This Project Is
 
-**Challenges**:
-- Sparse user interactions (median user has 2 interactions)
-- Multimodal item representations (text + images)
-- Sequential dependencies (recent items matter more)
-- Real-time inference requirements
+This project solves a real recommendation problem: given a user's past fashion interactions, predict what they are likely to interact with next.
 
----
+Core properties:
 
-## 🏗️ Architecture
+- Multimodal item representation: title text + product image.
+- Sequential modeling: user history order is preserved (important for intent drift).
+- Implicit-feedback ranking: trained/evaluated with retrieval metrics such as Recall@K and NDCG@K.
+- Apple Silicon support: research model is designed to run well on MPS (Metal backend).
 
-### Two Model Implementations
+## What You Get In This Repo
 
-#### 1. **Research Transformer** (Primary Focus)
-- 4-layer PreNorm Transformer with learnable CLS token
-- Modality-aware positional embeddings (CLS, context, candidate)
-- BPR ranking loss optimization
-- **12.76M parameters**
-- **Recall@10: 0.5225 | NDCG@10: 0.3908**
+- Data preparation pipeline from raw Amazon-style JSON.gz files.
+- CLIP encoder wrapper for aligned text/image embeddings.
+- Two recommendation models.
+- Saved checkpoints and evaluation artifacts.
+- Streamlit demo for qualitative and quantitative inspection.
+- Consolidated architecture and project-structure documentation in this file.
 
-#### 2. **Baseline (Option B)**
-- Time-decayed weighted pooling of last 5 items
-- Optional BPR-tuned projection layer (512→512)
-- Dot product scoring (cosine similarity)
-- **Recall@10: 0.5277 | NDCG@10: 0.4523**
+## Final Results Achieved
 
-### Key Design Choices
+Evaluation setup used in this project:
 
+- 2000 sampled evaluation users.
+- Top-K retrieval metrics: K = 5, 10, 20.
+- Seen-item masking during ranking.
+
+### Test Metrics
+
+| Model | Recall@5 | Recall@10 | Recall@20 | NDCG@5 | NDCG@10 | NDCG@20 |
+|---|---:|---:|---:|---:|---:|---:|
+| Research Transformer | 0.4339 | 0.5225 | 0.5564 | 0.3590 | 0.3908 | 0.4008 |
+| Option B Baseline | 0.4786 | 0.5277 | 0.5601 | 0.4325 | 0.4523 | 0.4627 |
+
+Result files available in `checkpoints/`:
+
+- `checkpoints/research_mps_results.pkl`
+- `checkpoints/option_b_results.pkl`
+
+## High-Level Architecture
+
+### 1) Item Embeddings (Shared by Both Models)
+
+- Encoder: CLIP ViT-B/32.
+- Text embedding and image embedding are fused by averaging.
+- Final vector is L2-normalized.
+- Embedding size: 512.
+
+Fusion rule:
+
+$$
+e_{item} = \text{normalize}\left(\frac{e_{text} + e_{image}}{2}\right)
+$$
+
+### 2) Option B Baseline
+
+- User vector = time-decayed weighted mean of the last 5 interacted items.
+- Item scoring uses vectorized dot product on normalized vectors.
+- Optional projection layer can be BPR-tuned.
+
+### 3) Research Transformer
+
+- Input tokens: `[CLS] + user_history + candidate_item`.
+- Learnable position embeddings and modality/type embeddings.
+- 4-layer PreNorm transformer encoder, 8 heads, GELU feed-forward block.
+- Score head: CLS output -> MLP -> scalar relevance score.
+- Loss: BPR pairwise ranking loss.
+
+## Inference and Evaluation Design
+
+Important engineering choice in this repo: vectorized scoring.
+
+- For each user, candidate scoring is done in batch against all catalog items.
+- Seen items are masked before top-K extraction.
+- This avoids slow nested Python loops and keeps inference practical for demo/eval.
+
+## Detailed Architecture
+
+### Transformer Input and Token Layout
+
+The research model builds a joint token sequence:
+
+- token 0: learnable CLS token
+- tokens 1..S: user history item embeddings
+- final token: candidate item embedding
+
+With `MAX_SEQ_LEN = 20`, the maximum token length is:
+
+$$
+	ext{MAX\_TOKENS} = 20 + 2 = 22
+$$
+
+### Learnable Embedding Components
+
+- positional embedding over 22 positions
+- modality/type embedding with 3 types:
+	- type 0: CLS
+	- type 1: user-context tokens
+	- type 2: candidate token
+
+### Encoder and Scoring Head
+
+- 4-layer TransformerEncoder
+- PreNorm (`norm_first=True`)
+- 8 attention heads
+- feed-forward block: 512 -> 2048 -> 512
+- CLS output is layer-normalized and sent through MLP: 512 -> 256 -> 1
+
+### Training Objective (BPR)
+
+Pairwise ranking objective:
+
+$$
+\mathcal{L}_{BPR} = -\log\left(\sigma(s_{pos} - s_{neg})\right)
+$$
+
+where $s_{pos}$ is the score for a positive next item and $s_{neg}$ is for a sampled negative item.
+
+### Data Flow (End-to-End)
+
+1. Raw interactions and metadata are loaded and filtered.
+2. Temporal splits are generated: train/val/test.
+3. Item text/image embeddings are built with CLIP and fused.
+4. Models are trained with ranking loss.
+5. Metrics are computed on sampled users with top-K retrieval.
+6. Streamlit app serves recommendations from saved checkpoints.
+
+## Repository Map (Complete)
+
+### Top Level
+
+- `app.py`: Streamlit application used for interactive recommendation demo.
+- `README.md`: Project overview and usage guide.
+- `requirements.txt`: Python dependencies.
+
+### Directory Tree
+
+```text
+product_recommendation/
+├── README.md
+├── requirements.txt
+├── app.py
+├── checkpoints/
+│   ├── .gitkeep
+│   ├── item_embedding_matrix.pt
+│   ├── option_b_model.pt
+│   ├── option_b_results.pkl
+│   ├── research_mps_model.pt
+│   └── research_mps_results.pkl
+├── data/
+│   ├── AMAZON_FASHION_5.json.gz
+│   ├── meta_AMAZON_FASHION.json.gz
+│   ├── image_encoder_data.pkl
+│   └── prepared_data.pkl
+├── models/
+│   ├── clip_encoder.py
+│   └── option_b_model.py
+└── src/
+	├── __init__.py
+	├── data/
+	│   ├── __init__.py
+	│   └── prepare_dataset.py
+	├── embeddings/
+	│   ├── __init__.py
+	│   └── clip_encoder.py
+	├── evaluation/
+	│   └── __init__.py
+	├── models/
+	│   ├── __init__.py
+	│   ├── baseline.py
+	│   └── transformer.py
+	└── training/
+		└── __init__.py
 ```
-Item Representation:
-  - Frozen CLIP ViT-B/32 embeddings (text + image)
-  - L2-normalized 512-dimensional vectors
-  - 798/1000 items have images
 
-User Representation:
-  - Transformer: Learnable CLS token aggregating last 20 interactions
-  - Baseline: Exponentially time-decayed mean of last 5 items
+### Data and Artifacts
 
-Training:
-  - Loss: BPR (Bayesian Personalized Ranking)
-  - Optimizer: AdamW (lr=1e-4, weight_decay=1e-4)
-  - Batch size: 128, Epochs: 5
-  - Device: Apple MPS (Metal Performance Shaders)
+- `data/AMAZON_FASHION_5.json.gz`: raw interaction data.
+- `data/meta_AMAZON_FASHION.json.gz`: item metadata.
+- `data/prepared_data.pkl`: processed sequences/splits/metadata/index maps.
+- `data/image_encoder_data.pkl`: precomputed image embeddings.
+- `checkpoints/research_mps_model.pt`: transformer weights.
+- `checkpoints/item_embedding_matrix.pt`: item embedding matrix used by transformer inference.
+- `checkpoints/option_b_model.pt`: Option B model artifact.
+- `checkpoints/research_mps_results.pkl`: transformer metrics.
+- `checkpoints/option_b_results.pkl`: Option B metrics.
 
-Evaluation:
-  - Fully vectorized (zero nested loops)
-  - Batch expansion technique for efficient scoring
-  - 2000 users, 1000 items → 5 minutes on MPS
-```
+### Source Modules
 
-For detailed architecture documentation, see [**ARCHITECTURE.md**](ARCHITECTURE.md).
+- `src/data/prepare_dataset.py`: raw data loading, filtering, temporal split, metadata prep.
+- `src/embeddings/clip_encoder.py`: CLIP wrapper (text/image encoders + compatibility wrappers).
+- `src/models/baseline.py`: Option B baseline implementation and evaluation flow.
+- `src/models/transformer.py`: research transformer training/evaluation implementation.
+- `src/training/__init__.py`: placeholder package for future training module extraction.
+- `src/evaluation/__init__.py`: placeholder package for future metrics module extraction.
 
----
+### Legacy Compatibility Modules
 
-## 📊 Results
+- `models/clip_encoder.py`: compatibility CLIP encoder module.
+- `models/option_b_model.py`: compatibility Option B module.
 
-### Test Set Performance (2000 random users, seed=42)
+## How to Run
 
-|Model|Recall@5|Recall@10|Recall@20|NDCG@5|NDCG@10|NDCG@20|Training Time|
-|-----|--------|---------|---------|------|-------|-------|-------------|
-|**Transformer**|0.4339|0.5225|0.5564|0.3590|0.3908|0.4008|~34 min|
-|**Baseline**|0.4786|0.5277|0.5601|0.4325|0.4523|0.4627|~25 sec|
-
-**Key Insights**:
-- Both models achieve >52% Recall@10 on highly sparse data
-- Baseline is competitive due to strong CLIP embeddings + time decay
-- Transformer has headroom for improvement (hyperparameter tuning, longer context)
-- 10× faster evaluation vs naive nested loops (5min vs 2hr)
-
----
-
-## 🚀 Quick Start
-
-### 1. Installation
+## 1) Environment Setup
 
 ```bash
-# Clone repository
-git clone https://github.com/yourusername/product_recommendation.git
-cd product_recommendation
-
-# Install dependencies
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-**Requirements**: Python 3.10+, PyTorch 2.0+, Apple M1/M2 Mac (for MPS acceleration)
+## 2) Run the Demo App (Fastest Way to Validate Project)
 
-### 2. Prepare Data
-
-```bash
-# Download Amazon Fashion dataset
-# Place AMAZON_FASHION_5.json.gz and meta_AMAZON_FASHION.json.gz in data/
-
-# Process raw data
-python src/data/prepare_dataset.py
-```
-
-**Output**: `data/prepared_data.pkl`, `data/image_encoder_data.pkl`
-
-### 3. Train Models
-
-#### Option A: Train Baseline (Fast)
-
-```bash
-python src/models/baseline.py --train
-```
-
-**Time**: ~25 seconds on CPU  
-**Output**: `option_b_model.pt`, `option_b_results.pkl`
-
-#### Option B: Train Transformer (Research)
-
-```bash
-python src/models/transformer.py --train_and_eval --epochs 5 --batch_size 128 --max_users 50000
-```
-
-**Time**: ~50 minutes on MPS (M1 Max)  
-**Output**: `research_mps_model.pt`, `item_embedding_matrix.pt`, `research_mps_results.pkl`
-
-### 4. Launch Demo App
+This repo already includes prepared data and checkpoints. You can run the app directly:
 
 ```bash
 streamlit run app.py
 ```
 
-Open browser at `http://localhost:8501` to interact with the recommendation system.
+App capabilities:
 
-**Features**:
-- Model selector (Baseline / Transformer)
-- 2000 pre-sampled users with ≥5 interactions
-- Random user button
-- User history visualization (last 5 items with images)
-- Top-K recommendations (3-21, adjustable)
-- Evaluation metrics display
-- Cold-start fallback (popularity-based)
+- Choose model backend (Option B or Research Transformer).
+- Select/randomize users.
+- View user recent history.
+- Generate Top-K recommendations.
+- View Recall@10 and NDCG@10 from saved evaluation outputs.
+- Cold-start fallback via popularity ranking.
 
----
+## 3) Data Preparation Script
 
-## 📁 Project Structure
+Data preparation logic exists in `src/data/prepare_dataset.py` and includes:
 
-```
-product_recommendation/
-│
-├── src/
-│   ├── data/
-│   │   ├── __init__.py
-│   │   └── prepare_dataset.py       # Raw data → prepared_data.pkl
-│   ├── embeddings/
-│   │   ├── __init__.py
-│   │   └── clip_encoder.py          # Frozen CLIP ViT-B/32 wrapper
-│   ├── models/
-│   │   ├── __init__.py
-│   │   ├── baseline.py              # Option B (CLIP + pooling + BPR)
-│   │   └── transformer.py           # Sequential Transformer
-│   ├── training/                    # Training utilities (modular)
-│   │   └── __init__.py
-│   └── evaluation/                  # Evaluation metrics (modular)
-│       └── __init__.py
-│
-├── data/
-│   ├── AMAZON_FASHION_5.json.gz     # Raw interactions
-│   ├── meta_AMAZON_FASHION.json.gz  # Item metadata
-│   ├── prepared_data.pkl            # Processed dataset
-│   └── image_encoder_data.pkl       # CLIP image embeddings
-│
-├── checkpoints/
-│   ├── research_mps_model.pt        # Transformer weights
-│   ├── item_embedding_matrix.pt     # Frozen CLIP embeddings [1000, 512]
-│   ├── option_b_model.pt            # Baseline weights
-│   ├── option_b_results.pkl         # Baseline eval metrics
-│   └── research_mps_results.pkl     # Transformer eval metrics
-│
-├── models/                          # Legacy folder (kept for compatibility)
-│   ├── clip_encoder.py
-│   └── option_b_model.py
-│
-├── app.py                           # Streamlit demo
-├── requirements.txt                 # Python dependencies
-├── README.md                        # This file
-├── ARCHITECTURE.md                  # Detailed technical documentation
-└── .gitignore
+- review parsing from gzipped JSON lines,
+- user/item filtering,
+- temporal split,
+- metadata extraction,
+- index mapping and serialization.
+
+Note: it expects raw source file names consistent with the script (`reviews_Fashion.json.gz`, `meta_Fashion.json.gz`) unless adapted. The repository currently stores raw files as `data/AMAZON_FASHION_5.json.gz` and `data/meta_AMAZON_FASHION.json.gz`.
+
+## 4) Transformer Training/Evaluation
+
+Primary research training entrypoint:
+
+```bash
+python src/models/transformer.py --train_and_eval --epochs 5 --batch_size 128 --max_users 50000
 ```
 
----
+Expected outputs in `checkpoints/`:
 
-## 🔬 Technical Highlights
+- `research_mps_model.pt`
+- `item_embedding_matrix.pt`
+- `research_mps_results.pkl`
 
-### 1. **Fully Vectorized Evaluation**
+## About Option B Training Script
 
-No nested `user × item` loops. Batch expansion technique for efficient scoring:
+The repository includes Option B training implementations under both `src/models/baseline.py` and `models/option_b_model.py`. The shipped checkpoints already let you run inference in the app immediately.
 
-```python
-# ❌ Naive (slow): 2000 users × 1000 items = 2M forward passes
-for user in users:
-    for item in items:
-        score = model(user, item)
+## Technical Stack
 
-# ✅ Optimized (fast): 2000 batched forwards
-user_seq = pad_sequence(user)           # [1, 20, 512]
-user_exp = user_seq.expand(1000, -1, -1) # [1000, 20, 512]
-scores = model(user_exp, items)          # [1000] in ONE forward!
-```
+- PyTorch
+- Transformers (Hugging Face)
+- Streamlit
+- NumPy
+- Pandas
+- Pillow
+- tqdm
 
-**Result**: 5 minutes vs 2 hours.
+## Why This Project Matters
 
-### 2. **Apple MPS Optimization**
+- Demonstrates that strong multimodal embeddings + efficient ranking can be highly competitive.
+- Shows practical trade-off between lightweight baseline and expressive sequential transformer.
+- Includes a full demo path from artifacts to UI, not only offline model scripts.
+- Useful template for recommendation systems on Apple Silicon environments.
 
-```python
-# Device detection
-device = torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu")
+## Current Limitations and Next Improvements
 
-# Float32 only (no AMP on MPS)
-model = model.to(device).float()
+- Training/evaluation utility code can be further modularized into `src/training/` and `src/evaluation/`.
+- Path/config conventions are not yet fully unified across all scripts.
+- Additional experiments (hard negatives, longer history, hyperparameter sweeps) can improve transformer quality.
 
-# Efficient memory
-with torch.no_grad():
-    scores = model(batch)
-```
+## References
 
-### 3. **Frozen CLIP Embeddings**
-
-- **Text**: CLIP ViT-B/32 tokenizer + text encoder (frozen)
-- **Image**: CLIP ViT-B/32 vision encoder (frozen) → 224×224 RGB
-- **Fusion**: `L2_norm((text + image) / 2)`
-- **Benefit**: Zero-shot multimodal transfer, no item-side gradients
-
-### 4. **PreNorm Transformer**
-
-```python
-# LayerNorm BEFORE attention/FFN (not after)
-norm_first=True   # More stable training
-```
-
-### 5. **BPR Ranking Loss**
-
-```python
-# Optimizes: positive items rank higher than negatives
-loss = -log(sigmoid(score_pos - score_neg)).mean()
-```
+- Radford et al., CLIP (ICML 2021)
+- Rendle et al., BPR (UAI 2009)
+- McAuley et al., Amazon fashion recommendation datasets
 
 ---
 
-## 📈 Dataset
+If someone new reads this README, they should now understand:
 
-- **Source**: Amazon Fashion 5-core (McAuley et al., 2015)
-- **Users**: 223,975
-- **Items**: 1,000 (filtered for diversity)
-- **Interactions**: Sparse sequences (median: 2 per user)
-- **Splits**: 
-  - Train: 70% (temporal split)
-  - Validation: 10%
-  - Test: 20%
-
----
-
-## 🛠️ Technologies
-
-- **PyTorch 2.0+**: Model implementation, MPS backend
-- **Transformers (HuggingFace)**: CLIP model loading
-- **Streamlit**: Interactive demo UI
-- **NumPy, Pandas**: Data processing
-- **Pillow**: Image loading
-- **tqdm**: Progress bars
-
----
-
-## 📝 Key Files
-
-|File|Purpose|Lines|
-|----|-------|-----|
-|`src/models/transformer.py`|Sequential transformer model + training + eval|~760|
-|`src/models/baseline.py`|Baseline model (pooling + BPR)|~680|
-|`src/embeddings/clip_encoder.py`|Frozen CLIP wrapper|~195|
-|`src/data/prepare_dataset.py`|Data preprocessing pipeline|~450|
-|`app.py`|Streamlit production demo|~800|
-|`ARCHITECTURE.md`|Technical deep-dive|~650|
-
----
-
-## 🎓 Research Contributions
-
-1. **MPS-first transformer recommender**: Optimized for Apple Silicon (not CUDA)
-2. **Batch expansion evaluation**: Zero nested loops via tensor broadcasting
-3. **Modality-aware embeddings**: Learnable type embeddings for context/candidate distinction
-4. **Frozen multimodal tower**: CLIP embeddings with no fine-tuning (efficient)
-5. **Production Streamlit app**: Model-agnostic inference API, user history viz
-
----
-
-## 📚 References
-
-1. Radford et al., **"Learning Transferable Visual Models From Natural Language Supervision"**, ICML 2021 (CLIP)
-2. Rendle et al., **"BPR: Bayesian Personalized Ranking from Implicit Feedback"**, UAI 2009
-3. Xiong et al., **"On Layer Normalization in the Transformer Architecture"**, ICML 2020 (PreNorm)
-4. McAuley et al., **"Image-based Recommendations on Styles and Substitutes"**, SIGIR 2015 (Dataset)
-
----
-
-## 🚧 Future Work
-
-- [ ] Cross-attention between user/item towers
-- [ ] Hard negative sampling (similar items)
-- [ ] Longer context (MAX_SEQ_LEN: 20 → 50)
-- [ ] Multi-task learning (click + purchase signals)
-- [ ] Flash Attention (if MPS supports)
-- [ ] Model distillation (transformer → lightweight)
-
----
-
-## 📄 License
-
-MIT License - See `LICENSE` file for details.
-
----
-
-## 👤 Author
-
-**Dhanu** — ML Research Engineer  
-📧 Contact: [your.email@domain.com]  
-🔗 LinkedIn: [linkedin.com/in/yourprofile]  
-🐙 GitHub: [github.com/yourusername]
-
----
-
-## 🌟 Citation
-
-If you use this code in your research, please cite:
-
-```bibtex
-@misc{multimodal_transformer_recommender_2026,
-  author = {Your Name},
-  title = {Multimodal Sequential Transformer Recommender},
-  year = {2026},
-  publisher = {GitHub},
-  url = {https://github.com/yourusername/product_recommendation},
-  note = {Research-grade implementation with Apple MPS optimization}
-}
-```
-
----
-
-**Built with ❤️ using PyTorch and Apple Silicon**
+- what problem is solved,
+- how data flows through the system,
+- how each major file/module contributes,
+- which results were achieved,
+- and how to run the project quickly.
